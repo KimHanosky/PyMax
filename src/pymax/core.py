@@ -9,7 +9,7 @@ import time
 import traceback
 from collections.abc import Awaitable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Literal
+from typing import TYPE_CHECKING, Any, Literal
 from uuid import UUID
 
 from typing_extensions import override
@@ -34,7 +34,6 @@ if TYPE_CHECKING:
     from pymax.filters import BaseFilter
 
     from .types import Channel, Chat, Dialog, Me, Message, ReactionInfo, User
-
 
 logger = logging.getLogger(__name__)
 
@@ -297,6 +296,34 @@ class MaxClient(ApiMixin, WebSocketMixin, BaseClient):
         else:
             self.logger.info("Login successful, token saved to database, exiting...")
 
+    # TODO переписать как _on_error_handler
+    async def _reconnect_exception_handler(self, exception: Exception):
+        if isinstance(exception, Error):
+            self.logger.exception(f"Client stopped with error: {exception}")
+
+        if not self.reconnect:
+            self.logger.exception("Client start iteration failed, no reconnect configured")
+            raise exception
+
+        if self._on_error_handler:
+            try:
+                result = self._on_error_handler(exception)
+                if asyncio.iscoroutine(result):
+                    await self._safe_execute(result, context="on_error handler")
+            except Exception as unknown_e:
+                self.logger.exception("Unhandled exception in on_error handler")
+                raise unknown_e
+        else:
+            tb = traceback.format_exc()
+            self.logger.error(f"Traceback:\n{tb}")
+
+        self.logger.info("Reconnect enabled — restarting client")
+        await asyncio.sleep(self.reconnect_delay)
+
+        if isinstance(exception, asyncio.CancelledError):
+            self.logger.info("Client task cancelled, stopping")
+            raise exception
+
     async def _auth_cycle(self):
         is_authorised = False
 
@@ -321,32 +348,20 @@ class MaxClient(ApiMixin, WebSocketMixin, BaseClient):
                 is_authorised = True
                 break
 
-            except asyncio.CancelledError as cancel_e:
-                self.logger.info("Client task cancelled, stopping")
-
-                raise cancel_e
-
-            except Exception as unknown_e:
-                self.logger.exception("Client auth iteration failed")
-
-                if not self.reconnect or self._stop_event.is_set():
-                    self.logger.info("Reconnect disabled or stop requested — exiting start()")
-
-                    raise unknown_e
-
-                self.logger.info("Reconnect enabled — restarting client")
-                await asyncio.sleep(self.reconnect_delay)
+            except Exception as e:
+                await self._reconnect_exception_handler(e)
 
             finally:
                 if not is_authorised:
                     await self._cleanup_client()
+                    self.logger.info("Client exited cleanly")
 
     async def _wait_cycle(self):
         while not self._stop_event.is_set():
             try:
                 if not self.is_connected:
-                    await self.connect(self.user_agent)
-                    await self._sync(self.user_agent)
+                    await self.connect(self.headers)
+                    await self._sync(self.headers)
                     await self._post_login_tasks(sync=False)
 
                 wait_task = asyncio.create_task(self._wait_forever())
@@ -361,35 +376,8 @@ class MaxClient(ApiMixin, WebSocketMixin, BaseClient):
                     with contextlib.suppress(asyncio.CancelledError):
                         await task
 
-            except Error as e:
-                self.logger.exception(f"Client stopped with error: {e}")
-                if self._on_error_handler:
-                    try:
-                        result = self._on_error_handler(e)
-                        if asyncio.iscoroutine(result):
-                            await self._safe_execute(result, context="on_error handler")
-                    except Exception:
-                        self.logger.exception("Unhandled exception in on_error handler")
-                        raise
-                else:
-                    tb = traceback.format_exc()
-                    self.logger.error(f"Traceback:\n{tb}")
-
-            except asyncio.CancelledError as cancel_e:
-                self.logger.info("Client task cancelled, stopping")
-
-                raise cancel_e
-
-            except Exception as unknown_e:
-                self.logger.exception("Client wait iteration failed")
-
-                if not self.reconnect or self._stop_event.is_set():
-                    self.logger.info("Reconnect disabled or stop requested — exiting start()")
-
-                    raise unknown_e
-
-                self.logger.info("Reconnect enabled — restarting client")
-                await asyncio.sleep(self.reconnect_delay)
+            except Exception as e:
+                await self._reconnect_exception_handler(e)
 
             finally:
                 await self._cleanup_client()
