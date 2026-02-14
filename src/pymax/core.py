@@ -345,7 +345,6 @@ class MaxClient(ApiMixin, WebSocketMixin, BaseClient):
 
             except asyncio.CancelledError as cancel_e:
                 self.logger.info("Client task cancelled, stopping")
-                await self._cleanup_client()
 
                 raise cancel_e
 
