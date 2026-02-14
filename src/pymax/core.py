@@ -33,7 +33,6 @@ if TYPE_CHECKING:
 
     from .types import Channel, Chat, Dialog, Me, Message, ReactionInfo, User
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -280,16 +279,9 @@ class MaxClient(ApiMixin, WebSocketMixin, BaseClient):
         else:
             self.logger.info("Login successful, token saved to database, exiting...")
 
-    async def start(self) -> None:
-        """
-        Запускает клиент, подключается к WebSocket, авторизует
-        пользователя (если нужно) и запускает фоновый цикл.
-        Теперь включает безопасный reconnect-loop, если self.reconnect=True.
+    async def _auth_cycle(self):
+        is_authorised = False
 
-        :return: None
-        :rtype: None
-        """
-        self.logger.info("Client starting")
         while not self._stop_event.is_set():
             try:
                 await self.connect(self.user_agent)
@@ -308,6 +300,37 @@ class MaxClient(ApiMixin, WebSocketMixin, BaseClient):
                 await self._sync(self.user_agent)
                 await self._post_login_tasks(sync=False)
 
+                is_authorised = True
+                break
+
+            except asyncio.CancelledError as cancel_e:
+                self.logger.info("Client task cancelled, stopping")
+
+                raise cancel_e
+
+            except Exception as unknown_e:
+                self.logger.exception("Client auth iteration failed")
+
+                if not self.reconnect or self._stop_event.is_set():
+                    self.logger.info("Reconnect disabled or stop requested — exiting start()")
+
+                    raise unknown_e
+
+                self.logger.info("Reconnect enabled — restarting client")
+                await asyncio.sleep(self.reconnect_delay)
+
+            finally:
+                if not is_authorised:
+                    await self._cleanup_client()
+
+    async def _wait_cycle(self):
+        while not self._stop_event.is_set():
+            try:
+                if not self.is_connected:
+                    await self.connect(self.user_agent)
+                    await self._sync(self.user_agent)
+                    await self._post_login_tasks(sync=False)
+
                 wait_task = asyncio.create_task(self._wait_forever())
                 stop_task = asyncio.create_task(self._stop_event.wait())
 
@@ -320,22 +343,34 @@ class MaxClient(ApiMixin, WebSocketMixin, BaseClient):
                     with contextlib.suppress(asyncio.CancelledError):
                         await task
 
-            except asyncio.CancelledError:
+            except asyncio.CancelledError as cancel_e:
                 self.logger.info("Client task cancelled, stopping")
-                break
-            except Exception as e:
-                self.logger.exception("Client start iteration failed")
+                await self._cleanup_client()
+
+                raise cancel_e
+
+            except Exception as unknown_e:
+                self.logger.exception("Client wait iteration failed")
+
+                if not self.reconnect or self._stop_event.is_set():
+                    self.logger.info("Reconnect disabled or stop requested — exiting start()")
+
+                    raise unknown_e
+
+                self.logger.info("Reconnect enabled — restarting client")
+                await asyncio.sleep(self.reconnect_delay)
+
             finally:
                 await self._cleanup_client()
 
-            if not self.reconnect or self._stop_event.is_set():
-                self.logger.info("Reconnect disabled or stop requested — exiting start()")
-                break
+    async def start(self) -> None:
+        self.logger.info("Client starting")
 
-            self.logger.info("Reconnect enabled — restarting client")
-            await asyncio.sleep(self.reconnect_delay)
+        await self._auth_cycle()
+        self._create_safe_task(self._wait_cycle(), name="start")
 
-        self.logger.info("Client exited cleanly")
+        while not self.is_connected:
+            await asyncio.sleep(0.05)
 
 
 class SocketMaxClient(SocketMixin, MaxClient):

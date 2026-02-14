@@ -135,9 +135,7 @@ class BaseClient(ClientProtocol):
         self.logger.info("---------")
 
     async def __aenter__(self) -> Self:
-        self._create_safe_task(self.start(), name="start")
-        while not self.is_connected:
-            await asyncio.sleep(0.05)
+        await self.start()
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
@@ -168,7 +166,8 @@ class BaseTransport(ClientProtocol):
     @abstractmethod
     async def connect(
         self, user_agent: UserAgentPayload | None = None
-    ) -> dict[str, Any] | None: ...
+    ) -> dict[str, Any] | None:
+        ...
 
     @abstractmethod
     async def _send_and_wait(
@@ -177,10 +176,12 @@ class BaseTransport(ClientProtocol):
         payload: dict[str, Any],
         cmd: int = 0,
         timeout: float = DEFAULT_TIMEOUT,
-    ) -> dict[str, Any]: ...
+    ) -> dict[str, Any]:
+        ...
 
     @abstractmethod
-    async def _recv_loop(self) -> None: ...
+    async def _recv_loop(self) -> None:
+        ...
 
     def _make_message(
         self, opcode: Opcode, payload: dict[str, Any], cmd: int = 0
@@ -489,7 +490,7 @@ class BaseTransport(ClientProtocol):
         elif isinstance(error, WebSocketNotConnectedError):
             return 2.0
         else:
-            return float(2**retry_count)
+            return float(2 ** retry_count)
 
     async def _sync(self, user_agent: UserAgentPayload | None = None) -> None:
         self.logger.info("Starting initial sync")
