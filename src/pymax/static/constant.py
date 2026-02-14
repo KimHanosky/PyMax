@@ -87,6 +87,7 @@ DEFAULT_CHAT_MEMBERS_LIMIT: Final[int] = 50
 DEFAULT_MARKER_VALUE: Final[int] = 0
 DEFAULT_PING_INTERVAL: Final[float] = 30.0
 RECV_LOOP_BACKOFF_DELAY: Final[float] = 0.5
+DEFAULT_MESSAGES_LIMIT: Final[int] = 30
 
 
 class _Unset:

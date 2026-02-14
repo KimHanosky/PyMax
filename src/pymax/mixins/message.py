@@ -7,7 +7,7 @@ import aiohttp
 from aiofiles import open as aio_open
 from aiohttp import ClientSession, TCPConnector
 
-from pymax.exceptions import Error
+from pymax.exceptions import Error, ResponseStructureError
 from pymax.files import File, Photo, Video
 from pymax.formatting import Formatting
 from pymax.payloads import (
@@ -30,9 +30,10 @@ from pymax.payloads import (
     SendMessagePayloadMessage,
     UploadPayload,
     VideoAttachPayload,
+    SearchMessagesPayload,
 )
 from pymax.protocols import ClientProtocol
-from pymax.static.constant import DEFAULT_TIMEOUT
+from pymax.static.constant import DEFAULT_TIMEOUT, DEFAULT_MESSAGES_LIMIT
 from pymax.static.enum import AttachType, Opcode, ReadAction
 from pymax.types import (
     Attach,
@@ -121,7 +122,7 @@ class MessageMixin(ClientProtocol):
                 bytes_sent = 0
                 chunk_num = 0
                 for i in range(0, len(b), self.CHUNK_SIZE):
-                    chunk = b[i : i + self.CHUNK_SIZE]
+                    chunk = b[i: i + self.CHUNK_SIZE]
                     yield chunk
                     bytes_sent += len(chunk)
                     chunk_num += 1
@@ -220,9 +221,9 @@ class MessageMixin(ClientProtocol):
             try:
                 async with ClientSession(connector=connector, timeout=timeout) as session:
                     async with session.post(
-                        url=url,
-                        headers=headers,
-                        data=file_bytes,
+                            url=url,
+                            headers=headers,
+                            data=file_bytes,
                     ) as response:
                         if response.status != HTTPStatus.OK:
                             self.logger.error("Upload failed with status %s", response.status)
@@ -332,6 +333,46 @@ class MessageMixin(ClientProtocol):
                 ).model_dump(by_alias=True)
         self.logger.error(f"Attachment upload failed for {attach}")
         return None
+
+    async def _query_messages(
+        self,
+        payload: SearchMessagesPayload
+    ) -> tuple[list[Message], int | None]:
+        data = await self._send_and_wait(
+            opcode=Opcode.MSG_SEARCH,
+            payload=payload.model_dump(by_alias=True),
+        )
+
+        response_payload = data.get("payload", {})
+
+        if data.get("payload", {}).get("error"):
+            MixinsUtils.handle_error(data)
+
+        marker = response_payload.get("marker")
+
+        if isinstance(marker, str):
+            marker = int(marker)
+        elif isinstance(marker, int):
+            pass
+        elif marker is None:
+            # маркер может отсутствовать
+            pass
+        else:
+            raise ResponseStructureError("Invalid marker type in response")
+
+        messages = response_payload.get("result")
+        message_list = []
+
+        if isinstance(messages, list):
+            for item in messages:
+                if not isinstance(item, dict):
+                    raise ResponseStructureError("Invalid message structure in response")
+
+                message_list.append(Message.from_dict(item))
+        else:
+            raise ResponseStructureError("Invalid messages type in response")
+
+        return message_list, marker
 
     async def send_message(
         self,
@@ -877,3 +918,16 @@ class MessageMixin(ClientProtocol):
 
         self.logger.debug("read_message success")
         return ReadState.from_dict(data["payload"])
+
+    async def find_messages(
+        self,
+        chat_id: int,
+        query: str,
+        count: int = DEFAULT_MESSAGES_LIMIT
+    ) -> tuple[list[Message], int | None]:
+        payload = SearchMessagesPayload(
+            chat_id=chat_id,
+            query=query,
+            count=count
+        )
+        return await self._query_messages(payload)

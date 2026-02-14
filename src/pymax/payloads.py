@@ -401,3 +401,9 @@ class RequestEmailCodePayload(CamelModel):
 class SendEmailCodePayload(CamelModel):
     track_id: str
     verify_code: str
+
+
+class SearchMessagesPayload(CamelModel):
+    query: str
+    chat_id: int
+    count: int
