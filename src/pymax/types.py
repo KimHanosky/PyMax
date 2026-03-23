@@ -11,6 +11,7 @@ from .static.enum import (
     MessageType,
 )
 
+
 # TODO: все это нужно переделать на pydantic модели.
 # Я просто придерживаюсь текущего стиля.
 # - 6RUN0
@@ -556,7 +557,7 @@ class Element:
 
     @classmethod
     def from_dict(cls, data: dict[Any, Any]) -> Self:
-        return cls(type=data["type"], length=data["length"], from_=data.get("from"))
+        return cls(type=data["type"], length=data.get("length"), from_=data.get("from"))
 
     @override
     def __repr__(self) -> str:
@@ -675,16 +676,16 @@ class Message:
         status: MessageStatus | None,
         type: MessageType | str,
         attaches: (
-            list[
-                PhotoAttach
-                | VideoAttach
-                | FileAttach
-                | ControlAttach
-                | StickerAttach
-                | AudioAttach
-                | ContactAttach
-            ]
-            | None
+                list[
+                    PhotoAttach
+                    | VideoAttach
+                    | FileAttach
+                    | ControlAttach
+                    | StickerAttach
+                    | AudioAttach
+                    | ContactAttach
+                    ]
+                | None
         ),
     ) -> None:
         self.chat_id = chat_id
@@ -711,7 +712,7 @@ class Message:
             | StickerAttach
             | AudioAttach
             | ContactAttach
-        ] = []
+            ] = []
         for a in message.get("attaches", []):
             if a["_type"] == AttachType.PHOTO:
                 attaches.append(PhotoAttach.from_dict(a))
