@@ -30,6 +30,7 @@ from pymax.payloads import (
     SendMessagePayloadMessage,
     UploadPayload,
     VideoAttachPayload,
+    ResolveLinkPayload
 )
 from pymax.protocols import ClientProtocol
 from pymax.static.constant import DEFAULT_TIMEOUT
@@ -121,7 +122,7 @@ class MessageMixin(ClientProtocol):
                 bytes_sent = 0
                 chunk_num = 0
                 for i in range(0, len(b), self.CHUNK_SIZE):
-                    chunk = b[i : i + self.CHUNK_SIZE]
+                    chunk = b[i: i + self.CHUNK_SIZE]
                     yield chunk
                     bytes_sent += len(chunk)
                     chunk_num += 1
@@ -220,9 +221,9 @@ class MessageMixin(ClientProtocol):
             try:
                 async with ClientSession(connector=connector, timeout=timeout) as session:
                     async with session.post(
-                        url=url,
-                        headers=headers,
-                        data=file_bytes,
+                            url=url,
+                            headers=headers,
+                            data=file_bytes,
                     ) as response:
                         if response.status != HTTPStatus.OK:
                             self.logger.error("Upload failed with status %s", response.status)
@@ -332,6 +333,20 @@ class MessageMixin(ClientProtocol):
                 ).model_dump(by_alias=True)
         self.logger.error(f"Attachment upload failed for {attach}")
         return None
+
+    async def get_message_by_link(self, link: str):
+        payload = ResolveLinkPayload(
+            link=f"https://max.ru/{link}",
+        ).model_dump(by_alias=True)
+
+        data = await self._send_and_wait(opcode=Opcode.LINK_INFO, payload=payload)
+
+        if data.get("payload", {}).get("error"):
+            MixinsUtils.handle_error(data)
+
+        message = Message.from_dict(data.get("payload", {}).get("message", {}))
+
+        return message
 
     async def send_message(
         self,
