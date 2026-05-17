@@ -42,6 +42,7 @@ from pymax.types import (
     ReactionInfo,
     ReadState,
     VideoRequest,
+    Chat
 )
 from pymax.utils import MixinsUtils
 
@@ -334,7 +335,7 @@ class MessageMixin(ClientProtocol):
         self.logger.error(f"Attachment upload failed for {attach}")
         return None
 
-    async def get_message_by_link(self, link: str):
+    async def get_message_by_link(self, link: str) -> tuple[Message, Chat]:
         payload = ResolveLinkPayload(
             link=f"https://max.ru/{link}",
         ).model_dump(by_alias=True)
@@ -345,8 +346,9 @@ class MessageMixin(ClientProtocol):
             MixinsUtils.handle_error(data)
 
         message = Message.from_dict(data.get("payload", {}).get("message", {}))
+        chat = Chat.from_dict(data.get("payload", {}).get("chat", {}))
 
-        return message
+        return message, chat
 
     async def send_message(
         self,
